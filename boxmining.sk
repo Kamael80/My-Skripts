@@ -1,0 +1,322 @@
+# =========================================
+# Box Mining - CataMines Ultra (Final Fix)
+# =========================================
+
+options:
+    p: &8[&6BoxMining&8]
+    tName: &6&lMine Selector Tool
+
+# --- 1. THE WEIGHTED RESET ENGINE ---
+function reset_cata_mine(name: text):
+    set {_p1} to {mine.%{_name}%.p1}
+    set {_p2} to {mine.%{_name}%.p2}
+    if {_p1} or {_p2} is not set:
+        stop
+    set {_totalWeight} to 0
+    loop {mine.%{_name}%.chance::*}:
+        add loop-value to {_totalWeight}
+    set {_totalWeight} to 1 if {_totalWeight} <= 0
+    loop blocks within {_p1} and {_p2}:
+        set {_random} to random number between 0 and {_totalWeight}
+        set {_currentWeight} to 0
+        set {_placed} to false
+        loop {mine.%{_name}%.blocks::*}:
+            add {mine.%{_name}%.chance::%loop-index%} to {_currentWeight}
+            if {_random} <= {_currentWeight}:
+                set loop-block to (loop-value-2 parsed as item)
+                set {_placed} to true
+                stop loop
+        set loop-block to oak_log if {_placed} is false
+    if {mine.%{_name}%.broadcast} is true:
+        set {_d} to {mine.%{_name}%.display} ? {_name}
+        broadcast "{@p} &6&lMINE RESET! &fMine %{_d}% &fhas been refilled."
+
+# --- 2. GUI SYSTEMS ---
+function open_mine_settings(p: player, name: text):
+    set {_gui} to chest inventory with 1 row named "&8Settings: %{_name}%"
+    set slot 0 of {_gui} to grass block named "&a&lEdit Materials" with lore "&7Change blocks and their weights"
+    set {_icon} to {mine.%{_name}%.icon} ? grass block
+    set slot 1 of {_gui} to {_icon} named "&b&lChange Icon" with lore "&7Current: &f%type of {_icon}%" and "" and "&e&lCLICK TO SET:" and "&7Click to type an item ID in chat."
+    set {_d} to {mine.%{_name}%.display} ? {_name}
+    set slot 3 of {_gui} to name tag named "&f&lRename Mine" with lore "&7Current: %{_d}%" and "&7Click to change display name"
+    set {_cd} to {mine.%{_name}%.cooldown} ? 0
+    set slot 5 of {_gui} to clock named "&e&lAuto-Reset Cooldown" with lore "&7Current: &f%{_cd}%m" and "&7Click to change"
+    set {_status} to "&aEnabled"
+    set {_status} to "&cDisabled" if {mine.%{_name}%.broadcast} is false
+    set slot 7 of {_gui} to paper named "&b&lBroadcast Toggle" with lore "&7Status: %{_status}%"
+    set slot 8 of {_gui} to tnt named "&c&lTEST RESET" with lore "&7Force a manual refill right now."
+    open {_gui} to {_p}
+
+function open_material_editor(p: player, name: text):
+    set {_gui} to chest inventory with 3 rows named "&8Editor: %{_name}%"
+    set {_total} to 0
+    loop {mine.%{_name}%.chance::*}:
+        add loop-value to {_total}
+    set {_slot} to 0
+    loop {mine.%{_name}%.blocks::*}:
+        set {_w} to {mine.%{_name}%.chance::%loop-index%}
+        set {_percent} to ({_w} / {_total}) * 100 if {_total} > 0 else 0
+        set {_i} to loop-value parsed as item
+        set {_i} to barrier if {_i} is not set
+        set slot {_slot} of {_gui} to {_i} named "&b%loop-value%" with lore "&eWeight: &f%{_w}% &7(&a%{_percent}%%%&7)"
+        add 1 to {_slot}
+    set slot 18 of {_gui} to redstone named "&a&lAdd Block"
+    set slot 22 of {_gui} to arrow named "&e&lBack to Settings"
+    set slot 26 of {_gui} to barrier named "&c&lClear All"
+    open {_gui} to {_p}
+
+# --- 3. INTERACTION HANDLER ---
+on inventory click:
+    set {_inv} to uncolored name of event-inventory
+    
+    if {_inv} contains "Settings:":
+        cancel event
+        set {_mine} to {_inv}
+        replace all "Settings: " with "" in {_mine}
+        if index of event-slot is 0:
+            open_material_editor(player, {_mine})
+        else if index of event-slot is 1:
+            set {action.%player%} to "set_icon_manual"
+            set {target.%player%} to {_mine}
+            close player's inventory
+            send "{@p} &eType the Item ID for the icon or &c'cancel'&e:" to player
+        else if index of event-slot is 3:
+            set {action.%player%} to "rename_mine"
+            set {target.%player%} to {_mine}
+            close player's inventory
+            send "{@p} &eType the new display name or &c'cancel'&e:" to player
+        else if index of event-slot is 5:
+            set {action.%player%} to "set_cooldown"
+            set {target.%player%} to {_mine}
+            close player's inventory
+            send "{@p} &eType cooldown in minutes or &c'cancel'&e:" to player
+        else if index of event-slot is 7:
+            set {mine.%{_mine}%.broadcast} to false if {mine.%{_mine}%.broadcast} is true else true
+            open_mine_settings(player, {_mine})
+        else if index of event-slot is 8:
+            reset_cata_mine({_mine})
+
+    else if {_inv} contains "Editor:":
+        cancel event
+        set {_mine} to {_inv}
+        replace all "Editor: " with "" in {_mine}
+        if index of event-slot is 18:
+            set {action.%player%} to "add_block"
+            set {target.%player%} to {_mine}
+            close player's inventory
+            send "{@p} &eType Block ID (e.g., stone) or &c'cancel'&e:" to player
+        else if index of event-slot is 22:
+            open_mine_settings(player, {_mine})
+        else if index of event-slot is 26:
+            delete {mine.%{_mine}%.blocks::*}
+            delete {mine.%{_mine}%.chance::*}
+            open_material_editor(player, {_mine})
+        else if event-item is not air:
+            if index of event-slot < 18:
+                set {action.%player%} to "set_chance"
+                set {target.%player%} to {_mine}
+                set {index.%player%} to (index of event-slot + 1)
+                close player's inventory
+                send "{@p} &eType weight or &c'cancel'&e:" to player
+
+    else if {_inv} is "Box Mining Menu":
+        cancel event
+        if index of event-slot is 1:
+            execute player command "/minetool"
+        else if index of event-slot is 3:
+            execute player command "/mines 1"
+        else if index of event-slot is 5:
+            set {deleting_mine.%player%} to true
+            close player's inventory
+            send "{@p} &c&lDELETE MODE: &7Type the mine ID to delete or &f'cancel'&7:" to player
+        else if index of event-slot is 7:
+            execute player command "/minehelp"
+
+    else if {_inv} contains "Active Mines":
+        cancel event
+        set {_pageText} to {_inv}
+        replace all "Active Mines - Page " with "" in {_pageText}
+        set {_page} to {_pageText} parsed as number
+        
+        # Navigation logic
+        if index of event-slot is 22:
+            execute player command "/boxmining"
+            stop
+        if index of event-slot is 26:
+            if size of {mine.list::*} > ({_page} * 18):
+                set {_next} to {_page} + 1
+                execute player command "/mines %{_next}%"
+            stop
+        if index of event-slot is 18:
+            if {_page} > 1:
+                set {_prev} to {_page} - 1
+                execute player command "/mines %{_prev}%"
+            stop
+
+        # Mine selection logic (Slots 0-17)
+        if index of event-slot < 18:
+            set {_offset} to ({_page} - 1) * 18
+            set {_mineIndex} to index of event-slot + 1 + {_offset}
+            set {_m} to {mine.list::%{_mineIndex}%}
+            if {_m} is set:
+                if click type is left mouse button:
+                    reset_cata_mine({_m})
+                else if click type is right mouse button:
+                    open_mine_settings(player, {_m})
+
+# --- 4. CHAT HANDLER ---
+on chat:
+    if {deleting_mine.%player%} is set:
+        cancel event
+        delete {deleting_mine.%player%}
+        if message is not "cancel":
+            execute player command "/deletemine %message%"
+        stop
+    if {action.%player%} is set:
+        cancel event
+        set {_t} to {target.%player%}
+        set {_act} to {action.%player%}
+        delete {action.%player%}
+        delete {target.%player%}
+        if message is "cancel":
+            send "{@p} &cAction cancelled." to player
+            stop
+        if {_act} is "set_icon_manual":
+            set {_item} to message parsed as item
+            if {_item} is set:
+                set {mine.%{_t}%.icon} to type of {_item}
+                send "{@p} &aIcon updated!" to player
+            else:
+                send "{@p} &cInvalid item ID!" to player
+            open_mine_settings(player, {_t})
+        else if {_act} is "rename_mine":
+            set {mine.%{_t}%.display} to colored message
+            send "{@p} &aName updated!" to player
+            open_mine_settings(player, {_t})
+        else if {_act} is "set_cooldown":
+            set {mine.%{_t}%.cooldown} to message parsed as number
+            send "{@p} &aCooldown updated!" to player
+            open_mine_settings(player, {_t})
+        else if {_act} is "add_block":
+            add message to {mine.%{_t}%.blocks::*}
+            add 10 to {mine.%{_t}%.chance::*}
+            open_material_editor(player, {_t})
+        else if {_act} is "set_chance":
+            set {mine.%{_t}%.chance::%{index.%player%}%} to message parsed as number
+            open_material_editor(player, {_t})
+
+# --- 5. COMMANDS ---
+command /boxmining:
+    permission: admin.mines
+    trigger:
+        set {_m} to chest inventory with 1 row named "&6&lBox Mining Menu"
+        set slot 1 of {_m} to stick named "{@tName}"
+        set slot 3 of {_m} to chest minecart named "&e&lManage Mines"
+        set slot 5 of {_m} to barrier named "&c&lDelete Mode"
+        set slot 7 of {_m} to book named "&b&lHelp Guide"
+        open {_m} to player
+
+command /mines [<number=1>]:
+    permission: admin.mines
+    trigger:
+        set {_gui} to chest inventory with 3 rows named "&6&lActive Mines - Page %arg 1%"
+        
+        # Fill navigation row with filler first so we know it's working
+        loop 9 times:
+            set slot (17 + loop-number) of {_gui} to gray stained glass pane named " "
+            
+        set {_start} to (arg 1 - 1) * 18
+        set {_slot} to 0
+        
+        loop 18 times:
+            set {_currentMineIndex} to {_start} + loop-number
+            set {_id} to {mine.list::%{_currentMineIndex}%}
+            if {_id} is set:
+                set {_icon} to {mine.%{_id}%.icon} ? grass block
+                set {_d} to {mine.%{_id}%.display} ? {_id}
+                set slot {_slot} of {_gui} to {_icon} named "%{_d}%" with lore "&7ID: %{_id}%" and "" and "&aLeft: Reset &7| &eRight: Settings"
+                add 1 to {_slot}
+        
+        # Navigation Items
+        if arg 1 > 1:
+            set slot 18 of {_gui} to arrow named "&e&lPrevious Page"
+        
+        set slot 22 of {_gui} to barrier named "&c&lBack to Main Menu"
+
+        if size of {mine.list::*} > ({_start} + 18):
+            set slot 26 of {_gui} to arrow named "&e&lNext Page"
+            
+        open {_gui} to player
+
+command /minehelp:
+    permission: admin.mines
+    trigger:
+        send "" to player
+        send "&6&l⭐ BoxMining Admin Guide ⭐" to player
+        send "&8&l&m------------------------------------" to player
+        send "&e&l1. Setup Commands" to player
+        send "&6/minetool &7- Get the selection stick."
+        send "&f• &7Left-Click &ffor &aPos 1 &7| &7Right-Click &ffor &ePos 2"
+        send "&6/createmine <ID> &7- Creates mine in selection."
+        send "" to player
+        send "&e&l2. Management" to player
+        send "&6/boxmining &7- Open main dashboard."
+        send "&6/mines &7- List active mines & Reset/Edit."
+        send "" to player
+        send "&e&l3. Pro-Tips" to player
+        send "&f• &bIcons: &7Click the icon in settings, then type item ID in chat."
+        send "&f• &bWeights: &7Higher = common. (Stone: 100, Diamond: 1)"
+        send "&f• &bColor: &7Rename supports '&aC&bo&cl&eo&dr&1s&r'."
+        send "&8&l&m------------------------------------" to player
+
+command /minetool:
+    permission: admin.mines
+    trigger:
+        give 1 of stick named "{@tName}" with lore "&aLeft: Pos 1 &7| &eRight: Pos 2" to player
+
+command /createmine <text>:
+    permission: admin.mines
+    trigger:
+        if {pos1.%player%} is not set:
+            send "{@p} &cSelect positions first!" to player
+            stop
+        set {mine.%arg 1%.p1} to {pos1.%player%}
+        set {mine.%arg 1%.p2} to {pos2.%player%}
+        set {mine.%arg 1%.broadcast} to true
+        add arg 1 to {mine.list::*} if {mine.list::*} does not contain arg 1
+        send "{@p} &aMine &e%arg 1% &asaved!" to player
+
+command /deletemine <text>:
+    permission: admin.mines
+    trigger:
+        if {mine.list::*} contains arg 1:
+            remove arg 1 from {mine.list::*}
+            delete {mine.%arg 1%.p1}
+            delete {mine.%arg 1%.p2}
+            delete {mine.%arg 1%.blocks::*}
+            delete {mine.%arg 1%.chance::*}
+            delete {mine.%arg 1%.cooldown}
+            delete {mine.%arg 1%.timer}
+            delete {mine.%arg 1%.display}
+            delete {mine.%arg 1%.icon}
+            send "{@p} &cMine &e%arg 1% &7deleted." to player
+
+on left click:
+    if uncolored name of player's tool is uncolored "{@tName}":
+        cancel event
+        set {pos1.%player%} to location of event-block
+        send "{@p} &aPos 1 set!" to player
+
+on right click:
+    if uncolored name of player's tool is uncolored "{@tName}":
+        cancel event
+        set {pos2.%player%} to location of event-block
+        send "{@p} &ePos 2 set!" to player
+
+every 1 minute:
+    loop {mine.list::*}:
+        if {mine.%loop-value%.cooldown} > 0:
+            add 1 to {mine.%loop-value%.timer}
+            if {mine.%loop-value%.timer} >= {mine.%loop-value%.cooldown}:
+                set {mine.%loop-value%.timer} to 0
+                reset_cata_mine(loop-value)
